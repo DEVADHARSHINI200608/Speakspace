@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SpeakSpace – Smart Assistant</title>
+
+<style>
+body {
+    background: #0d1117;
+    color: #ffffff;
+    font-family: Arial, sans-serif;
+    padding: 20px;
+}
+button {
+    padding: 10px 18px;
+    margin: 6px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+}
+#micBtn { background:#1e90ff; color:white }
+#stopBtn { background:#ff4444; color:white }
+#sendBtn { background:#32cd32 }
+#speakBtn { background:#ff9800 }
+#clearBtn { background:#777; color:white }
+.box {
+    background:#161b22;
+    padding:15px;
+    margin-top:15px;
+    border-radius:8px;
+}
+textarea {
+    width:100%;
+    background:#0d1117;
+    color:white;
+    border:1px solid #30363d;
+    padding:10px;
+    border-radius:6px;
+}
+pre { white-space: pre-wrap; }
+</style>
+</head>
+
+<body>
+
+<h1>🎤 SpeakSpace – Voice Assistant</h1>
+
+<button id="micBtn">🎙 Start Listening</button>
+<button id="stopBtn">🛑 Stop</button>
+<button id="sendBtn">📨 Send to Backend</button>
+<button id="speakBtn">🔊 Speak Response</button>
+<button id="clearBtn">🧹 Clear</button>
+
+<div class="box">
+    <h3>Transcript</h3>
+    <textarea id="transcriptBox" rows="4"></textarea>
+</div>
+
+<div class="box">
+    <h3>Backend Response</h3>
+    <pre id="responseBox">{}</pre>
+</div>
+
+<script>
+let recognition, listening=false;
+
+// ---------------- SPEECH TO TEXT ----------------
+document.getElementById("micBtn").onclick = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.lang = "en-US";
+
+    recognition.onresult = e => {
+        const box = document.getElementById("transcriptBox");
+        box.value += (box.value ? "\n" : "") + e.results[0][0].transcript;
+    };
+    recognition.start();
+};
+
+document.getElementById("stopBtn").onclick = () => recognition?.stop();
+
+// ---------------- SEND ----------------
+document.getElementById("sendBtn").onclick = async () => {
+    const text = transcriptBox.value.trim();
+    if(!text) return alert("Empty transcript");
+
+    const res = await fetch("http://127.0.0.1:5000/process", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ transcript: text })
+    });
+
+    const data = await res.json();
+    responseBox.textContent = JSON.stringify(data, null, 2);
+    window.lastSpeech = data.spoken_text || JSON.stringify(data);
+};
+
+// ---------------- SPEAK ----------------
+document.getElementById("speakBtn").onclick = () => {
+    if(!window.lastSpeech) return alert("Nothing to speak");
+    speechSynthesis.cancel();
+    speechSynthesis.speak(new SpeechSynthesisUtterance(window.lastSpeech));
+};
+
+// ---------------- CLEAR ----------------
+document.getElementById("clearBtn").onclick = () => {
+    transcriptBox.value="";
+    responseBox.textContent="{}";
+    window.lastSpeech="";
+};
+</script>
+
+</body>
+</html>
