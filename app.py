@@ -7,21 +7,25 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# ===================== GLOBAL STATE =====================
+# ===================== GLOBAL MEMORY =====================
 RECENT_CUSTOMER = None
 PENDING_MEETING = None
 
+# ===================== SETTINGS =====================
+DATEPARSER_SETTINGS = {
+    "PREFER_DATES_FROM": "future",   # 🔥 key fix
+    "RETURN_AS_TIMEZONE_AWARE": False
+}
 
 # ===================== UTILS =====================
 def clean_name(name):
     return name.strip().title()
 
-
 # ===================== CUSTOMER =====================
 def extract_customer_name(text):
     patterns = [
-        r"customer is ([a-zA-Z ]+)",
         r"meeting with ([a-zA-Z ]+)",
+        r"customer is ([a-zA-Z ]+)",
         r"client is ([a-zA-Z ]+)"
     ]
     for p in patterns:
@@ -30,44 +34,24 @@ def extract_customer_name(text):
             return clean_name(m.group(1))
     return None
 
-
 # ===================== DURATION =====================
 def extract_duration(text):
-    match = re.search(r"(\d+)\s*(minute|min|minutes)", text)
+    match = re.search(r"(\d+)\s*(minute|minutes|min)", text)
     if match:
         return int(match.group(1))
-
-    word_map = {
-        "five": 5, "ten": 10, "fifteen": 15,
-        "twenty": 20, "thirty": 30
-    }
-
-    for word, val in word_map.items():
-        if word in text and "minute" in text:
-            return val
-
-    if "half hour" in text:
-        return 30
-
     return None
 
-
-# ===================== DATE + TIME =====================
+# ===================== DATETIME =====================
 def extract_datetime(text):
     """
     Handles:
-    - today
+    - next Tuesday
     - tomorrow
-    - next tuesday
-    - monday at 11:30
+    - today
+    - explicit date
+    - time like 4 pm, 11.30 am
     """
-    settings = {
-        "PREFER_DATES_FROM": "future",
-        "RELATIVE_BASE": datetime.now()
-    }
-
-    return dateparser.parse(text, settings=settings)
-
+    return dateparser.parse(text, settings=DATEPARSER_SETTINGS)
 
 # ===================== MAIN API =====================
 @app.post("/process")
@@ -78,7 +62,7 @@ def process():
 
     # ---------- CONFIRM ----------
     if PENDING_MEETING:
-        if any(x in transcript for x in ["yes", "confirm", "ok"]):
+        if "yes" in transcript or "confirm" in transcript:
             data = PENDING_MEETING
             PENDING_MEETING = None
             return jsonify({
@@ -86,59 +70,40 @@ def process():
                 **data
             })
 
-        if any(x in transcript for x in ["no", "cancel"]):
+        if "no" in transcript or "cancel" in transcript:
             PENDING_MEETING = None
             return jsonify({"message": "Meeting cancelled"})
 
-    # ---------- CUSTOMER ----------
+    # ---------- EXTRACT ----------
     name = extract_customer_name(transcript)
-    if name and "meeting" not in transcript:
+    if name:
         RECENT_CUSTOMER = name
-        return jsonify({
-            "message": "Customer set",
-            "customer": name
-        })
 
-    # ---------- MEETING ----------
-    if "meeting" in transcript or "schedule" in transcript:
+    customer = RECENT_CUSTOMER or "Unknown"
 
-        if name:
-            RECENT_CUSTOMER = name
+    dt = extract_datetime(transcript)
+    duration = extract_duration(transcript)
 
-        customer = RECENT_CUSTOMER or "Unknown"
+    if not dt:
+        return jsonify({"error": "Could not understand date/time"})
 
-        start_dt = extract_datetime(transcript)
-        duration = extract_duration(transcript)
+    start_time = dt
+    end_time = start_time + timedelta(minutes=duration or 30)
 
-        if not start_dt:
-            return jsonify({"error": "Date or time not understood"})
+    # ---------- SAVE ----------
+    PENDING_MEETING = {
+        "customer": customer,
+        "date": start_time.strftime("%d-%m-%Y"),
+        "day": start_time.strftime("%A"),
+        "start_time": start_time.strftime("%I:%M %p"),
+        "end_time": end_time.strftime("%I:%M %p"),
+        "duration_minutes": duration or 30
+    }
 
-        end_dt = None
-        if duration:
-            end_dt = start_dt + timedelta(minutes=duration)
-
-        meeting = {
-            "customer": customer,
-            "date": start_dt.strftime("%d-%m-%Y"),
-            "day": start_dt.strftime("%A"),
-            "start_time": start_dt.strftime("%I:%M %p"),
-            "end_time": end_dt.strftime("%I:%M %p") if end_dt else "Unknown",
-            "duration_minutes": duration
-        }
-
-        PENDING_MEETING = meeting
-
-        return jsonify({
-            "message": "Confirmation required",
-            **meeting,
-            "spoken_text": (
-                f"Meeting with {customer} on {meeting['day']} "
-                f"at {meeting['start_time']}. Confirm?"
-            )
-        })
-
-    return jsonify({"message": "No action detected"})
-
+    return jsonify({
+        "message": "Confirmation required",
+        **PENDING_MEETING
+    })
 
 # ===================== RUN =====================
 if __name__ == "__main__":
