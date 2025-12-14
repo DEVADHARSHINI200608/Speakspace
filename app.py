@@ -37,8 +37,6 @@ def extract_customer_name(text):
 
 
 # ===================== DURATION =====================
-import re
-
 def extract_duration(text):
     text = text.lower()
 
@@ -57,50 +55,28 @@ def extract_duration(text):
         "eighty": 80, "ninety": 90
     }
 
-    # 1️⃣ Numeric → "10 minutes"
     match = re.search(r"(\d+)\s*(min|mins|minutes)", text)
     if match:
         return int(match.group(1))
 
-    # 2️⃣ Word numbers → "sixteen minutes", "twenty five minutes"
     words = text.split()
-
     for i in range(len(words)):
-        if words[i] in units:
-            number = units[words[i]]
-            if i + 1 < len(words) and words[i + 1] in tens:
-                number += tens[words[i + 1]]
-            if "minute" in text:
-                return number
+        if words[i] in units and "minute" in text:
+            return units[words[i]]
+        if words[i] in tens and "minute" in text:
+            return tens[words[i]]
 
-        if words[i] in tens:
-            number = tens[words[i]]
-            if i + 1 < len(words) and words[i + 1] in units:
-                number += units[words[i + 1]]
-            if "minute" in text:
-                return number
-
-    # 3️⃣ Half hour
     if "half hour" in text or "half an hour" in text:
         return 30
 
     return None
 
 
-
 # ===================== TIME =====================
 def extract_time(text):
-    full = re.search(
-        r"\b(\d{1,2}(:\d{2})?\s*(am|pm))\b",
-        text,
-        re.IGNORECASE
-    )
+    full = re.search(r"\b(\d{1,2}(:\d{2})?\s*(am|pm))\b", text, re.IGNORECASE)
     if full:
         return dateparser.parse(full.group(1))
-
-    partial = re.search(r"\b(\d{1,2}(:\d{2})?)\b", text)
-    if partial:
-        return "NEEDS_AMPM"
 
     natural = {
         "morning": "9 am",
@@ -179,38 +155,26 @@ def process():
 
         customer = RECENT_CUSTOMER or "Unknown"
 
-        day = extract_day(transcript)
-        if not day:
-            return jsonify({
-                "error": "Day missing",
-                "spoken_text": "Please mention the meeting day."
-            }), 400
+        day = extract_day(transcript) or "Unknown"
 
         today = datetime.now()
-        idx = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"].index(day)
-        days_ahead = (idx - today.weekday()) % 7 or 7
-        meeting_dt = today + timedelta(days=days_ahead)
-
-        date = meeting_dt.strftime("%d-%m-%Y")
+        date = today.strftime("%d-%m-%Y")
 
         start_dt = extract_time(transcript)
 
-        if start_dt == "NEEDS_AMPM":
-            return jsonify({
-                "error": "AM/PM missing",
-                "spoken_text": "Please specify AM or PM."
-            }), 400
-
-        if not start_dt:
-            return jsonify({
-                "error": "Time missing",
-                "spoken_text": "Please mention meeting time."
-            }), 400
-
-        start_time = start_dt.strftime("%I:%M %p")
+        if start_dt:
+            start_time = start_dt.strftime("%I:%M %p")
+        else:
+            start_time = "Unknown"
 
         duration = extract_duration(transcript)
-        end_time = (start_dt + timedelta(minutes=duration)).strftime("%I:%M %p")
+
+        if start_dt and duration:
+            end_time = (start_dt + timedelta(minutes=duration)).strftime("%I:%M %p")
+        elif duration is None:
+            end_time = "End time missing"
+        else:
+            end_time = "Unknown"
 
         PENDING_MEETING = {
             "customer": customer,
